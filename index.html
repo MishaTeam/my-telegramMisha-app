@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mines Provably Fair</title>
     <script src="https://telegram.org"></script>
-    <!-- Подключаем библиотеку для шифрования SHA-256 -->
-    <script src="https://cloudflare.com"></script>
     <style>
         body {
             font-family: 'Segoe UI', Roboto, sans-serif;
@@ -107,16 +105,15 @@
     <script>
         const tg = window.Telegram.WebApp;
         tg.ready();
-        tg.expand(); // Разворачиваем на весь экран
+        tg.expand();
 
         let balance = 1000;
         let bet = 100;
-        let gameState = 'idle'; // idle, playing, over
+        let gameState = 'idle';
         let minesCount = 4;
-        let board = []; // 0 - пусто, 1 - мина
+        let board = [];
         let revealedCount = 0;
         let currentMultiplier = 1.0;
-        let roundSalt = ""; // Соль для хэша
 
         const gridEl = document.getElementById('grid');
         const startBtn = document.getElementById('start-btn');
@@ -125,7 +122,14 @@
         const keyEl = document.getElementById('result-key');
         const balanceEl = document.getElementById('balance');
 
-        // Создаем сетку 5x5 при запуске
+        // Встроенная функция генерации SHA-256 без внешних библиотек
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);                    
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
         function initGrid() {
             gridEl.innerHTML = '';
             for (let i = 0; i < 25; i++) {
@@ -138,9 +142,7 @@
             }
         }
 
-        // Генерация честного раунда (Provably Fair)
-        function generateRound() {
-            // 1. Создаем игровое поле (4 мины)
+        async function generateRound() {
             board = Array(25).fill(0);
             let placed = 0;
             while (placed < minesCount) {
@@ -151,19 +153,18 @@
                 }
             }
 
-            // 2. Делаем текстовую строку из поля и добавляем случайную соль (Salt)
-            roundSalt = Math.random().toString(36).substring(2, 12);
+            const roundSalt = Math.random().toString(36).substring(2, 12);
             const rawData = "board:" + board.join(",") + "-salt:" + roundSalt;
 
-            // 3. Хэшируем данные через SHA-256 и показываем игроку до начала кликов!
-            const hash = CryptoJS.SHA256(rawData).toString();
+            // Хэшируем встроенным крипто-методом
+            const hash = await sha256(rawData);
             hashEl.innerText = hash;
             
             keyEl.style.display = 'none';
             keyEl.innerText = "Ключ проверки: " + rawData;
         }
 
-        function startGame() {
+        async function startGame() {
             if (balance < bet) {
                 tg.showAlert("Не хватает баланса!");
                 return;
@@ -175,12 +176,13 @@
             revealedCount = 0;
             currentMultiplier = 1.0;
             
-            generateRound();
+            startBtn.disabled = true;
+            hashEl.innerText = "Генерация честного раунда...";
+            
+            await generateRound();
             initGrid();
 
-            // Активируем ячейки
             document.querySelectorAll('.cell').forEach(c => c.classList.remove('disabled'));
-            startBtn.disabled = true;
             cashoutBtn.style.display = 'block';
             cashoutBtn.innerText = `Забрать: ${(bet * currentMultiplier).toFixed(0)}`;
         }
@@ -191,22 +193,19 @@
             if (cell.classList.contains('safe') || cell.classList.contains('mine')) return;
 
             if (board[idx] === 1) {
-                // Попал на мину — проигрыш
                 cell.classList.add('mine');
                 cell.innerText = '💣';
                 endGame(false);
             } else {
-                // Безопасно
                 cell.classList.add('safe');
                 cell.innerText = '💎';
                 revealedCount++;
                 
-                // Рассчитываем множитель за шаг
                 currentMultiplier += 0.25 * revealedCount;
                 cashoutBtn.innerText = `Забрать: ${(bet * currentMultiplier).toFixed(0)}`;
                 
                 if (revealedCount === (25 - minesCount)) {
-                    endGame(true); // Открыты все чистые клетки
+                    endGame(true);
                 }
             }
         }
@@ -223,9 +222,8 @@
             gameState = 'over';
             startBtn.disabled = false;
             cashoutBtn.style.display = 'none';
-            keyEl.style.display = 'block'; // Показываем исходный ключ для проверки!
+            keyEl.style.display = 'block';
 
-            // Показываем где были остальные мины
             board.forEach((val, i) => {
                 const cell = gridEl.children[i];
                 cell.classList.add('disabled');
@@ -245,7 +243,6 @@
         startBtn.addEventListener('click', startGame);
         cashoutBtn.addEventListener('click', cashout);
 
-        // Первая инициализация пустого поля
         initGrid();
     </script>
 </body>
