@@ -161,7 +161,7 @@
             const cells = gridEl.children;
             for (let i = 0; i < cells.length; i++) {
                 cells[i].className = 'cell'; // Активируем ячейки (убираем disabled)
-                cells[i].innerText = '❓';
+                cells[i].innerText = '😐';
                 cells[i].style.backgroundColor = '';
             }
         }
@@ -219,7 +219,7 @@
                     endGame(false);
                 } else {
                     this.classList.add('safe');
-                    this.innerText = '💎';
+                    this.innerText = '😁';
                     revealedCount++;
                     
                     currentMultiplier += 0.35;
@@ -250,7 +250,7 @@
             board.forEach((val, i) => {
                 cells[i].classList.add('disabled');
                 if (val === 1) {
-                    cells[i].innerText = '💣';
+                    cells[i].innerText = '😡';
                     if(!isWin) cells[i].style.backgroundColor = '#5c2b2b';
                 } else {
                     if (cells[i].innerText === '❓') cells[i].innerText = '💎';
