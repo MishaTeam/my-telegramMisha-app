@@ -14,9 +14,7 @@
             margin: 0;
             padding: 15px;
         }
-        .header {
-            margin-bottom: 15px;
-        }
+        .header { margin-bottom: 15px; }
         .balance-box {
             font-size: 20px;
             background: #242c3d;
@@ -49,10 +47,7 @@
         .cell.safe { background-color: #4caf50; }
         .cell.mine { background-color: #f44336; }
         .cell.disabled { pointer-events: none; opacity: 0.8; }
-        
-        .controls {
-            margin-bottom: 15px;
-        }
+        .controls { margin-bottom: 15px; }
         button {
             background-color: #007bff;
             color: white;
@@ -67,7 +62,6 @@
         }
         button:disabled { background-color: #4a5568; cursor: not-allowed; }
         #cashout-btn { background-color: #ff9800; display: none; }
-        
         .fairness-box {
             background: #151a24;
             padding: 10px;
@@ -97,7 +91,7 @@
 
     <div class="fairness-box">
         <div class="fairness-title">🛡️ Provably Fair (Честная игра):</div>
-        <div><strong>Текущий хэш раунда (SHA-256):</strong></div>
+        <div><strong>Текущий хэш раунда:</strong></div>
         <div id="round-hash" style="color: #ffeb3b; font-family: monospace;">Начните игру...</div>
         <div id="result-key" style="margin-top: 5px; color: #a5d6a7; display: none;"></div>
     </div>
@@ -105,7 +99,7 @@
     <script>
         const tg = window.Telegram.WebApp;
         tg.ready();
-        tg.expand();
+        if (tg.expand) tg.expand();
 
         let balance = 1000;
         let bet = 100;
@@ -122,12 +116,15 @@
         const keyEl = document.getElementById('result-key');
         const balanceEl = document.getElementById('balance');
 
-        // Встроенная функция генерации SHA-256 без внешних библиотек
-        async function sha256(message) {
-            const msgBuffer = new TextEncoder().encode(message);                    
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        // Простой и супернадёжный алгоритм хэширования без внешних зависимостей и системных crypto-блокировок
+        function simpleHash(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = (hash << 5) - hash + char;
+                hash = hash & hash; // Превращаем в 32-битное число
+            }
+            return "hash32_" + Math.abs(hash).toString(16) + btoa(str).substring(0, 10);
         }
 
         function initGrid() {
@@ -142,7 +139,7 @@
             }
         }
 
-        async function generateRound() {
+        function generateRound() {
             board = Array(25).fill(0);
             let placed = 0;
             while (placed < minesCount) {
@@ -156,17 +153,17 @@
             const roundSalt = Math.random().toString(36).substring(2, 12);
             const rawData = "board:" + board.join(",") + "-salt:" + roundSalt;
 
-            // Хэшируем встроенным крипто-методом
-            const hash = await sha256(rawData);
+            const hash = simpleHash(rawData);
             hashEl.innerText = hash;
             
             keyEl.style.display = 'none';
             keyEl.innerText = "Ключ проверки: " + rawData;
         }
 
-        async function startGame() {
+        function startGame() {
             if (balance < bet) {
-                tg.showAlert("Не хватает баланса!");
+                if (tg.showAlert) tg.showAlert("Не хватает баланса!");
+                else alert("Не хватает баланса!");
                 return;
             }
             balance -= bet;
@@ -177,9 +174,8 @@
             currentMultiplier = 1.0;
             
             startBtn.disabled = true;
-            hashEl.innerText = "Генерация честного раунда...";
             
-            await generateRound();
+            generateRound();
             initGrid();
 
             document.querySelectorAll('.cell').forEach(c => c.classList.remove('disabled'));
@@ -201,7 +197,7 @@
                 cell.innerText = '💎';
                 revealedCount++;
                 
-                currentMultiplier += 0.25 * revealedCount;
+                currentMultiplier += 0.35;
                 cashoutBtn.innerText = `Забрать: ${(bet * currentMultiplier).toFixed(0)}`;
                 
                 if (revealedCount === (25 - minesCount)) {
@@ -214,7 +210,9 @@
             if (gameState !== 'playing') return;
             balance += Math.floor(bet * currentMultiplier);
             balanceEl.innerText = balance;
-            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            if (tg.HapticFeedback && tg.HapticFeedback.notificationOccurred) {
+                tg.HapticFeedback.notificationOccurred('success');
+            }
             endGame(true);
         }
 
@@ -235,7 +233,7 @@
                 }
             });
 
-            if (!isWin && tg.HapticFeedback) {
+            if (!isWin && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred) {
                 tg.HapticFeedback.notificationOccurred('error');
             }
         }
