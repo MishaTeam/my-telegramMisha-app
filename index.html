@@ -3,46 +3,250 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Мое Mini App</title>
-    <!-- Подключаем скрипт Telegram -->
+    <title>Mines Provably Fair</title>
     <script src="https://telegram.org"></script>
+    <!-- Подключаем библиотеку для шифрования SHA-256 -->
+    <script src="https://cloudflare.com"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            background-color: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #000000);
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            background-color: #1a1f29;
+            color: #ffffff;
             text-align: center;
-            padding: 20px;
+            margin: 0;
+            padding: 15px;
+        }
+        .header {
+            margin-bottom: 15px;
+        }
+        .balance-box {
+            font-size: 20px;
+            background: #242c3d;
+            padding: 8px 15px;
+            border-radius: 8px;
+            display: inline-block;
+            font-weight: bold;
+            color: #4caf50;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+            max-width: 320px;
+            margin: 0 auto 15px auto;
+        }
+        .cell {
+            aspect-ratio: 1;
+            background-color: #2e394d;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            user-select: none;
+        }
+        .cell:active { transform: scale(0.95); }
+        .cell.safe { background-color: #4caf50; }
+        .cell.mine { background-color: #f44336; }
+        .cell.disabled { pointer-events: none; opacity: 0.8; }
+        
+        .controls {
+            margin-bottom: 15px;
         }
         button {
-            padding: 10px 20px;
-            background-color: var(--tg-theme-button-color, #2481cc);
-            color: var(--tg-theme-button-text-color, #ffffff);
+            background-color: #007bff;
+            color: white;
             border: none;
-            border-radius: 5px;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
             cursor: pointer;
+            font-weight: bold;
+            width: 100%;
+            max-width: 320px;
         }
+        button:disabled { background-color: #4a5568; cursor: not-allowed; }
+        #cashout-btn { background-color: #ff9800; display: none; }
+        
+        .fairness-box {
+            background: #151a24;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            max-width: 320px;
+            margin: 15px auto 0 auto;
+            text-align: left;
+            word-break: break-all;
+        }
+        .fairness-title { font-weight: bold; color: #90a4ae; margin-bottom: 4px; }
     </style>
 </head>
 <body>
-    <h1>Привет, <span id="username">Пользователь</span>!</h1>
-    <p>Это твое первое Telegram Mini App.</p>
-    <button id="main-btn">Показать главную кнопку</button>
+
+    <div class="header">
+        <h2>🔥 TG MINES 🔥</h2>
+        <div class="balance-box">💰 <span id="balance">1000</span></div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="controls">
+        <button id="start-btn">Начать игру (Ставка: 100)</button>
+        <button id="cashout-btn">Забрать выигрыш</button>
+    </div>
+
+    <div class="fairness-box">
+        <div class="fairness-title">🛡️ Provably Fair (Честная игра):</div>
+        <div><strong>Текущий хэш раунда (SHA-256):</strong></div>
+        <div id="round-hash" style="color: #ffeb3b; font-family: monospace;">Начните игру...</div>
+        <div id="result-key" style="margin-top: 5px; color: #a5d6a7; display: none;"></div>
+    </div>
 
     <script>
-        // Инициализируем Telegram WebApp
         const tg = window.Telegram.WebApp;
-        tg.ready(); // Сообщаем Telegram, что приложение готово
+        tg.ready();
+        tg.expand(); // Разворачиваем на весь экран
 
-        // Получаем имя пользователя из Telegram
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-            document.getElementById('username').innerText = tg.initDataUnsafe.user.first_name;
+        let balance = 1000;
+        let bet = 100;
+        let gameState = 'idle'; // idle, playing, over
+        let minesCount = 4;
+        let board = []; // 0 - пусто, 1 - мина
+        let revealedCount = 0;
+        let currentMultiplier = 1.0;
+        let roundSalt = ""; // Соль для хэша
+
+        const gridEl = document.getElementById('grid');
+        const startBtn = document.getElementById('start-btn');
+        const cashoutBtn = document.getElementById('cashout-btn');
+        const hashEl = document.getElementById('round-hash');
+        const keyEl = document.getElementById('result-key');
+        const balanceEl = document.getElementById('balance');
+
+        // Создаем сетку 5x5 при запуске
+        function initGrid() {
+            gridEl.innerHTML = '';
+            for (let i = 0; i < 25; i++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell', 'disabled');
+                cell.dataset.index = i;
+                cell.innerText = '❓';
+                cell.addEventListener('click', () => clickCell(i));
+                gridEl.appendChild(cell);
+            }
         }
 
-        // Логика для кнопки
-        document.getElementById('main-btn').addEventListener('click', () => {
-            tg.MainButton.setText("Кнопка из приложения!").show();
-        });
+        // Генерация честного раунда (Provably Fair)
+        function generateRound() {
+            // 1. Создаем игровое поле (4 мины)
+            board = Array(25).fill(0);
+            let placed = 0;
+            while (placed < minesCount) {
+                let idx = Math.floor(Math.random() * 25);
+                if (board[idx] === 0) {
+                    board[idx] = 1;
+                    placed++;
+                }
+            }
+
+            // 2. Делаем текстовую строку из поля и добавляем случайную соль (Salt)
+            roundSalt = Math.random().toString(36).substring(2, 12);
+            const rawData = "board:" + board.join(",") + "-salt:" + roundSalt;
+
+            // 3. Хэшируем данные через SHA-256 и показываем игроку до начала кликов!
+            const hash = CryptoJS.SHA256(rawData).toString();
+            hashEl.innerText = hash;
+            
+            keyEl.style.display = 'none';
+            keyEl.innerText = "Ключ проверки: " + rawData;
+        }
+
+        function startGame() {
+            if (balance < bet) {
+                tg.showAlert("Не хватает баланса!");
+                return;
+            }
+            balance -= bet;
+            balanceEl.innerText = balance;
+            
+            gameState = 'playing';
+            revealedCount = 0;
+            currentMultiplier = 1.0;
+            
+            generateRound();
+            initGrid();
+
+            // Активируем ячейки
+            document.querySelectorAll('.cell').forEach(c => c.classList.remove('disabled'));
+            startBtn.disabled = true;
+            cashoutBtn.style.display = 'block';
+            cashoutBtn.innerText = `Забрать: ${(bet * currentMultiplier).toFixed(0)}`;
+        }
+
+        function clickCell(idx) {
+            if (gameState !== 'playing') return;
+            const cell = gridEl.children[idx];
+            if (cell.classList.contains('safe') || cell.classList.contains('mine')) return;
+
+            if (board[idx] === 1) {
+                // Попал на мину — проигрыш
+                cell.classList.add('mine');
+                cell.innerText = '💣';
+                endGame(false);
+            } else {
+                // Безопасно
+                cell.classList.add('safe');
+                cell.innerText = '💎';
+                revealedCount++;
+                
+                // Рассчитываем множитель за шаг
+                currentMultiplier += 0.25 * revealedCount;
+                cashoutBtn.innerText = `Забрать: ${(bet * currentMultiplier).toFixed(0)}`;
+                
+                if (revealedCount === (25 - minesCount)) {
+                    endGame(true); // Открыты все чистые клетки
+                }
+            }
+        }
+
+        function cashout() {
+            if (gameState !== 'playing') return;
+            balance += Math.floor(bet * currentMultiplier);
+            balanceEl.innerText = balance;
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+            endGame(true);
+        }
+
+        function endGame(isWin) {
+            gameState = 'over';
+            startBtn.disabled = false;
+            cashoutBtn.style.display = 'none';
+            keyEl.style.display = 'block'; // Показываем исходный ключ для проверки!
+
+            // Показываем где были остальные мины
+            board.forEach((val, i) => {
+                const cell = gridEl.children[i];
+                cell.classList.add('disabled');
+                if (val === 1) {
+                    cell.innerText = '💣';
+                    if(!isWin) cell.style.backgroundColor = '#5c2b2b';
+                } else {
+                    if (cell.innerText === '❓') cell.innerText = '💎';
+                }
+            });
+
+            if (!isWin && tg.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('error');
+            }
+        }
+
+        startBtn.addEventListener('click', startGame);
+        cashoutBtn.addEventListener('click', cashout);
+
+        // Первая инициализация пустого поля
+        initGrid();
     </script>
 </body>
 </html>
